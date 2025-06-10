@@ -30,6 +30,17 @@ mutable struct TSISSolarModel{T} <: AbstractSolarModel
     irradiance_unit::Unitful.Units
 end
 
+mutable struct UoLFPSolarModel{T} <: AbstractSolarModel
+
+    file_name::String
+    ww::Vector{T}
+    transmittance::Vector{T}
+    continuum::Vector{T}
+    ww_unit::Union{Unitful.LengthUnits, Unitful.WavenumberUnits}
+    irradiance_unit::Unitful.Units
+
+end
+
 mutable struct ListSolarModel{T} <: AbstractSolarModel
 
     ww::Vector{T}

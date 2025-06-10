@@ -102,6 +102,18 @@ function calculate_solar_irradiance!(
             rt.hires_solar.I
         )
 
+    elseif solar_model isa UoLFPSolarModel
+        # Sample the solar spectrum at our Doppler-influenced
+        # retrieval wavelength grid
+        # (and calculate continuum * transmittance in one step)
+        pwl_value_1d_axb!(
+            solar_model.ww,
+            solar_model.transmittance,
+            solar_model.continuum,
+            swin.ww_grid,
+            rt.hires_solar.I,
+        ) 
+
     end
 
     # Apply the solar scaler
@@ -316,6 +328,131 @@ function TSISSolarModel(
         ww,
         ww_unit,
         irradiance,
+        irradiance_unit
+    )
+
+end
+
+"""
+Reads a Fraunhofer solar line list HDF5 file and returns
+a `UoLFPSolarModel` object.
+
+"""
+
+function UoLFPSolarModel(
+    filename::String,
+    swin::AbstractSpectralWindow
+    )
+
+    @assert isfile(filename) "File $(filename) is not a regular file!"
+
+    @debug "Opening up Solar HDF file $(filename)"
+    h5 = h5open(filename, "r")
+
+    #mol_mass = h5["molecular_mass"][:]
+    freq = h5["freq"][:]
+    stren = h5["stren"][:]
+    w_wid = h5["w_wid"][:]
+    d_wid = h5["d_wid"][:]
+
+    line_centre_unit = u"cm^-1"
+
+
+    #The following is from full_physics/forwardmodel/sunspect
+
+    acc=0.0001
+    margin=100
+
+    PI = 3.14159265358979323846
+    SOLAR_ANGULAR_RADIUS = (959.44/ 3600) * (PI / 180)
+
+    fovo = 9.2e-3 #I got this from full_physics/level_1b/level1b_file.F90. It might be for OCO-2, I don't know...
+    #fovo = 15.8e-3 #This is the GOSAT field of view, but with the current solar angular radius, frac > 1...
+    frac = fovo / (2 * SOLAR_ANGULAR_RADIUS) #Fraction of the solar diameter viewed, equation from calc_solar
+
+
+    #solar limb darkening?
+    #sld=2/(1+sqrt(1-frac^22))
+    sld=1 #UoL-FP uses this one
+
+    #Select the solar needed for this spectral window (with a margin)
+    kline1=searchsortedfirst(freq,swin.ww_grid[1]-margin)-1
+    kline2=searchsortedfirst(freq,swin.ww_grid[end]+margin)-1
+
+    transmittance = zeros(my_type, swin.N_hires)
+
+    for line = kline1:kline2
+        if stren[line] < 0
+            this_str= 0
+        else
+            this_str = stren[line]
+        end
+        this_freq = freq[line]
+        this_w_wid = w_wid[line]
+        this_d_wid = d_wid[line]
+        srot=5e-06*this_freq*frac #broadening due to solar rotation
+        d4=(this_d_wid^2+srot^2)^2  # Total Gaussian width
+        flinwid=sqrt(2*this_str*(this_d_wid+this_w_wid)/acc)
+
+        #if the broadened line lies outside our wavenumber range, we don't need to consider it
+        if ((this_freq + flinwid) < swin.ww_grid[1])  continue end
+        if ((this_freq - flinwid) > swin.ww_grid[end])  continue end
+
+        y2=(this_w_wid)^2
+        ss=sld*this_str
+        for iv= 1:swin.N_hires
+            xx = swin.ww_grid[iv] - this_freq
+            if (abs(xx) > flinwid) continue end
+            x2=xx^2
+            rr=x2/sqrt(d4+y2*x2*(1+abs(xx/(this_w_wid+0.07))))
+            yy=ss*exp(-rr)
+            transmittance[iv]-=yy
+        end
+    end
+
+    transmittance = exp.(transmittance)
+
+    #The following is from full_physics/forwardmodel/calc_solar
+
+    #continuum spectrum is calculated in ph/s/m2/micron so we need to convert wavenumber to microns
+    cont_microns=1e4./swin.ww_grid
+
+    bb = [-7.0251527e+22,3.1243395e+23,-4.2464027e+23,1.8903014e+23] #these values are from /data/ghgas/GOSAT/input/template/static_input/in/solar/solar_v2_2019.dat
+
+    continuum = zeros(length(cont_microns))
+    for (i,this_wl) in enumerate(cont_microns)
+        for j = 1:4
+            continuum[i]+=bb[j]*this_wl^(j-1)
+        end
+    end
+
+    #continuum radiance is in units ph/s/m2/micron so convert to W/m2/cm-1
+
+    #1) convert ph/s into W
+    @views continuum[:] .*= ustrip.(Ref(u"W"),
+        1.0u"s^-1" .* SPEED_OF_LIGHT ./ (cont_microns .* u"µm") .* PLANCK
+    )
+
+    #2) convert  W/m2/µm into W/m2/cm^-1
+    @views continuum[:] ./= (1e4 ./ cont_microns) .^ 2
+
+    continuum = continuum[end:-1:1]
+
+    ww_unit = u"cm^-1"
+    ww = swin.ww_grid
+
+    irradiance_unit = u"W/m^2/cm^-1" 
+
+    # Close up HDF file, all done
+    close(h5)
+
+    # Return solar model object
+    return UoLFPSolarModel(
+        filename,
+        ww,
+        transmittance,
+        continuum,
+        ww_unit,
         irradiance_unit
     )
 
