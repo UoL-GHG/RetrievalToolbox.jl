@@ -379,7 +379,7 @@ function UoLFPSolarModel(
     kline1=searchsortedfirst(freq,swin.ww_grid[1]-margin)-1
     kline2=searchsortedfirst(freq,swin.ww_grid[end]+margin)-1
 
-    transmittance = zeros(my_type, swin.N_hires)
+    transmittance = zeros(swin.N_hires)
 
     for line = kline1:kline2
         if stren[line] < 0
