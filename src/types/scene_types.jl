@@ -16,6 +16,8 @@ mutable struct EarthScene <: AtmosphereScene
     observer::AbstractObserver
     # A location object that describes where on Earth this measurement was taken
     location::AbstractLocation
+    # Earth-Sun distance in AU
+    earth_sun_distance::Number
     # The solar zenith angle, to be entered in Degrees!
     solar_zenith::Number
     # The solar azimuth angle, to be entered in Degrees!

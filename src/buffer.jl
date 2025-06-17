@@ -125,6 +125,7 @@ function EarthAtmosphereBuffer(
         location,
         zero(T),
         zero(T),
+        zero(T),
         DateTime(0)
     )
 

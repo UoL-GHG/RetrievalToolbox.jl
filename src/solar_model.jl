@@ -366,8 +366,7 @@ function UoLFPSolarModel(
     PI = 3.14159265358979323846
     SOLAR_ANGULAR_RADIUS = (959.44/ 3600) * (PI / 180)
 
-    fovo = 9.2e-3 #I got this from full_physics/level_1b/level1b_file.F90. It might be for OCO-2, I don't know...
-    #fovo = 15.8e-3 #This is the GOSAT field of view, but with the current solar angular radius, frac > 1...
+    fovo = 9.2e-3
     frac = fovo / (2 * SOLAR_ANGULAR_RADIUS) #Fraction of the solar diameter viewed, equation from calc_solar
 
 
@@ -474,4 +473,26 @@ function calculate_solar_doppler_shift(
     @warn "This is not yet implemented."
     return 0.0
 
+end
+
+"""
+Calculates the Earth-Sun distance for a given
+ `DateTime`.
+
+$(TYPEDSIGNATURES)
+
+"""
+function calculate_earth_sun_distance(time::Vector{DateTime})
+
+    #Calculate Earth-Sun distance (in AU)
+
+    #Parameters from 6th order polynomial fit to data from http://eclipse.gsfc.nasa.gov/TYPE/TYPE.html
+    a = [0.98334, -1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
+
+    year_frac = Dates.toms.(time-DateTime.(string.(year.(time)),dateformat"y")) ./ 1000 ./86400
+    j = [ones(length(year_frac)),year_frac,year_frac.^2,year_frac.^3,year_frac.^4,year_frac.^5,year_frac.^6]
+    year_frac_powers=[x[i] for x in values(j), i=1:length(first(j))]
+    solar_earth_dist=(transpose(a)*year_frac_powers)[1,:]
+
+    return solar_earth_dist
 end
