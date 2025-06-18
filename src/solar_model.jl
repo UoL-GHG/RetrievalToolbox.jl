@@ -51,8 +51,7 @@ function calculate_solar_irradiance!(
     if isnothing(doppler_factor)
 
         doppler_factor = calculate_solar_doppler_shift(
-            rt.scene.location,
-            rt.scene.time
+            rt.scene
         )
 
     end
@@ -132,6 +131,8 @@ function calculate_solar_irradiance!(
             solar_model.ww[i] *= (1 + doppler_factor)
         end
     end
+
+
 
 end
 
@@ -359,12 +360,9 @@ function UoLFPSolarModel(
 
 
     #The following is from full_physics/forwardmodel/sunspect
-
-    acc=0.0001
     margin=100
 
-    PI = 3.14159265358979323846
-    SOLAR_ANGULAR_RADIUS = (959.44/ 3600) * (PI / 180)
+    SOLAR_ANGULAR_RADIUS = (959.44/ 3600) * (pi / 180)
 
     fovo = 9.2e-3
     frac = fovo / (2 * SOLAR_ANGULAR_RADIUS) #Fraction of the solar diameter viewed, equation from calc_solar
@@ -391,7 +389,7 @@ function UoLFPSolarModel(
         this_d_wid = d_wid[line]
         srot=5e-06*this_freq*frac #broadening due to solar rotation
         d4=(this_d_wid^2+srot^2)^2  # Total Gaussian width
-        flinwid=sqrt(2*this_str*(this_d_wid+this_w_wid)/acc)
+        flinwid=sqrt(2*this_str*(this_d_wid+this_w_wid)/0.0001)
 
         #if the broadened line lies outside our wavenumber range, we don't need to consider it
         if ((this_freq + flinwid) < swin.ww_grid[1])  continue end
@@ -466,33 +464,62 @@ $(TYPEDSIGNATURES)
 
 """
 function calculate_solar_doppler_shift(
-    loc::EarthLocation,
-    time::DateTime,
+    scene::EarthScene
     )
 
+    #Calculate portion of doppler shift due to rotation of earth away from sun
+    earth_radius = 6378.137e3 * u"m"
+    earth_rot_freq = 2*pi/86164.09054 * u"s^-1"#earth's angular rotation frequency
+
+    geocen_lat = atand(tand(scene.location.latitude)/(1+6.73951496e-3)) #calculate geocentric latitude from geodetic latitude
+    gcrad = scene.location.altitude + earth_radius/sqrt(1+6.73951496e-3*sind(geocen_lat)^2) #local earth radius
+    earth_rot_velocity = -earth_rot_freq * gcrad * sind(scene.solar_zenith) * cosd(scene.solar_azimuth-90u"°") * cosd(geocen_lat)
+
+    #Calculate portion of doppler shift due to movement of earth center away from sun
+    a = [-1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
+    days_of_year = Dates.toms(dt-DateTime(string(year(dt)),dateformat"y")) / 1000 /86400 + 1.5
+    j = [1,2*days_of_year,3*days_of_year^2,4*days_of_year^3,5*days_of_year^4,6*days_of_year^5] #we want to calculate the derivate wrt time of the distance function
+    earth_sun_velocity=(transpose(a)*j)/86400*1.49597870691e11 #convert from AU/day to m/s
+
+    doppler_shift = (earth_rot_velocity + earth_sun_velocity)/2.99792458e8
+
     @warn "This is not yet implemented."
-    return 0.0
+    return doppler_shift
 
 end
 
 """
-Calculates the Earth-Sun distance for a given
+Calculates the Earth-Sun distances for given
  `DateTime`.
 
 $(TYPEDSIGNATURES)
 
 """
-function calculate_earth_sun_distance(time::Vector{DateTime})
+
+function calculate_earth_sun_distance(time::DateTime)
 
     #Calculate Earth-Sun distance (in AU)
 
     #Parameters from 6th order polynomial fit to data from http://eclipse.gsfc.nasa.gov/TYPE/TYPE.html
     a = [0.98334, -1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
 
-    year_frac = Dates.toms.(time-DateTime.(string.(year.(time)),dateformat"y")) ./ 1000 ./86400
-    j = [ones(length(year_frac)),year_frac,year_frac.^2,year_frac.^3,year_frac.^4,year_frac.^5,year_frac.^6]
-    year_frac_powers=[x[i] for x in values(j), i=1:length(first(j))]
-    solar_earth_dist=(transpose(a)*year_frac_powers)[1,:]
-
+    day_of_year = Dates.toms(time-DateTime(string(year(time)),dateformat"y")) ./ 1000 ./86400
+    j = [1,day_of_year,day_of_year^2,day_of_year^3,day_of_year^4,day_of_year^5,day_of_year^6]
+    solar_earth_dist=(transpose(a)*j)
     return solar_earth_dist
 end
+
+#function calculate_earth_sun_distance(time::Vector{DateTime})
+
+    #Calculate Earth-Sun distance (in AU)
+
+    #Parameters from 6th order polynomial fit to data from http://eclipse.gsfc.nasa.gov/TYPE/TYPE.html
+#    a = [0.98334, -1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
+
+#    day_of_year = Dates.toms.(time-DateTime.(string.(year.(time)),dateformat"y")) ./ 1000 ./86400
+#    j = [ones(length(day_of_year)),day_of_year,day_of_year.^2,day_of_year.^3,day_of_year.^4,day_of_year.^5,day_of_year.^6]
+#    day_of_year_powers=[x[i] for x in values(j), i=1:length(first(j))]
+#    solar_earth_dist=(transpose(a)*day_of_year_powers)[1,:]
+
+#    return solar_earth_dist
+#end
