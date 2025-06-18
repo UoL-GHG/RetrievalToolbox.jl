@@ -468,8 +468,8 @@ function calculate_solar_doppler_shift(
     )
 
     #Calculate portion of doppler shift due to rotation of earth away from sun
-    earth_radius = 6378.137e3 * u"m"
-    earth_rot_freq = 2*pi/86164.09054 * u"s^-1"#earth's angular rotation frequency
+    earth_radius = 6378.137e3
+    earth_rot_freq = 2*pi/86164.09054#earth's angular rotation frequency
 
     geocen_lat = atand(tand(scene.location.latitude)/(1+6.73951496e-3)) #calculate geocentric latitude from geodetic latitude
     gcrad = scene.location.altitude + earth_radius/sqrt(1+6.73951496e-3*sind(geocen_lat)^2) #local earth radius
@@ -477,13 +477,12 @@ function calculate_solar_doppler_shift(
 
     #Calculate portion of doppler shift due to movement of earth center away from sun
     a = [-1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
-    days_of_year = Dates.toms(dt-DateTime(string(year(dt)),dateformat"y")) / 1000 /86400 + 1.5
+    days_of_year = Dates.toms(scene.time-DateTime(string(year(scene.time)),dateformat"y")) / 1000 /86400 + 1.5
     j = [1,2*days_of_year,3*days_of_year^2,4*days_of_year^3,5*days_of_year^4,6*days_of_year^5] #we want to calculate the derivate wrt time of the distance function
-    earth_sun_velocity=(transpose(a)*j)/86400*1.49597870691e11 #convert from AU/day to m/s
+    earth_sun_velocity=(transpose(a)*j)/86400*1.49597870691e11  #convert from AU/day to m/s
 
     doppler_shift = (earth_rot_velocity + earth_sun_velocity)/2.99792458e8
 
-    @warn "This is not yet implemented."
     return doppler_shift
 
 end
