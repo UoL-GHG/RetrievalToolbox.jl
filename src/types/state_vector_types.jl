@@ -570,6 +570,7 @@ get_first_guess(SVE::AbstractStateVectorElement) = SVE.first_guess
 get_first_guess_with_unit(SVE::AbstractStateVectorElement) =
     get_first_guess(SVE) * SVE.unit
 get_current_value(SVE::AbstractStateVectorElement) = SVE.iterations[end]
+get_all_iterations(SVE::AbstractStateVectorElement) = SVE.iterations[:]
 get_current_value_with_unit(SVE::AbstractStateVectorElement) =
     get_current_value(SVE) * SVE.unit
 get_prior_value(SVE::AbstractStateVectorElement) = SVE.prior_value
