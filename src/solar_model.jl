@@ -342,7 +342,8 @@ a `UoLFPSolarModel` object.
 
 function UoLFPSolarModel(
     filename::String,
-    swin::AbstractSpectralWindow
+    spectral_grid::Vector,
+    wn_step::Float64
     )
 
     @assert isfile(filename) "File $(filename) is not a regular file!"
@@ -351,32 +352,29 @@ function UoLFPSolarModel(
     h5 = h5open(filename, "r")
 
     #mol_mass = h5["molecular_mass"][:]
-    freq = h5["freq"][:]
-    stren = h5["stren"][:]
-    w_wid = h5["w_wid"][:]
-    d_wid = h5["d_wid"][:]
+    freq = h5["freq"][:] #wavenumber of absorption line centre
+    stren = h5["stren"][:] #line strength
+    w_wid = h5["w_wid"][:] #line width in wavenumbers (unsure what each represents)
+    d_wid = h5["d_wid"][:] #line width in wavenumbers (potentially Doppler width?)
 
-    line_centre_unit = u"cm^-1"
+    solar_angular_radius = (959.44/ 3600) * (pi / 180)
+    fov = 9.2e-3 #field of view
+    frac = fov / (2 * solar_angular_radius) #Fraction of the solar diameter viewed
 
-
-    #The following is from full_physics/forwardmodel/sunspect
-    margin=100
-
-    SOLAR_ANGULAR_RADIUS = (959.44/ 3600) * (pi / 180)
-
-    fovo = 9.2e-3
-    frac = fovo / (2 * SOLAR_ANGULAR_RADIUS) #Fraction of the solar diameter viewed, equation from calc_solar
-
-
+    #Define spectral grid on which solar absorption will be calculated
+    solar_grid = collect(spectral_grid[1]:wn_step:spectral_grid[end])
+    
     #solar limb darkening?
-    #sld=2/(1+sqrt(1-frac^22))
-    sld=1 #UoL-FP uses this one
+    #sld=2/(1+sqrt(1-frac^2))
+    sld=1 #Assume no solar limb darkening?
 
-    #Select the solar needed for this spectral window (with a margin)
-    kline1=searchsortedfirst(freq,swin.ww_grid[1]-margin)-1
-    kline2=searchsortedfirst(freq,swin.ww_grid[end]+margin)-1
+    #Select the solar lines needed for this spectral window - add a 100 cm-1 margin on both ends
+    #to account for impact of broadened absorption lines centred outside the spectral window
+    margin=100 
+    kline1=searchsortedfirst(freq,solar_grid[1]-margin)-1
+    kline2=searchsortedfirst(freq,solar_grid[end]+margin)-1
 
-    transmittance = zeros(swin.N_hires)
+    transmittance = zeros(length(solar_grid))
 
     for line = kline1:kline2
         if stren[line] < 0
@@ -388,17 +386,17 @@ function UoLFPSolarModel(
         this_w_wid = w_wid[line]
         this_d_wid = d_wid[line]
         srot=5e-06*this_freq*frac #broadening due to solar rotation
-        d4=(this_d_wid^2+srot^2)^2  # Total Gaussian width
+        d4=(this_d_wid^2+srot^2)^2  #Total Gaussian width
         flinwid=sqrt(2*this_str*(this_d_wid+this_w_wid)/0.0001)
 
-        #if the broadened line lies outside our wavenumber range, we don't need to consider it
-        if ((this_freq + flinwid) < swin.ww_grid[1])  continue end
-        if ((this_freq - flinwid) > swin.ww_grid[end])  continue end
+        #if the broadened line lies entirely outside our wavenumber range, we don't need to consider it
+        if ((this_freq + flinwid) < solar_grid[1])  continue end
+        if ((this_freq - flinwid) > solar_grid[end])  continue end
 
         y2=(this_w_wid)^2
         ss=sld*this_str
-        for iv= 1:swin.N_hires
-            xx = swin.ww_grid[iv] - this_freq
+        for iv= 1:length(solar_grid)
+            xx = solar_grid[iv] - this_freq
             if (abs(xx) > flinwid) continue end
             x2=xx^2
             rr=x2/sqrt(d4+y2*x2*(1+abs(xx/(this_w_wid+0.07))))
@@ -409,12 +407,12 @@ function UoLFPSolarModel(
 
     transmittance = exp.(transmittance)
 
-    #The following is from full_physics/forwardmodel/calc_solar
-
     #continuum spectrum is calculated in ph/s/m2/micron so we need to convert wavenumber to microns
-    cont_microns=1e4./swin.ww_grid
+    cont_microns=1e4./solar_grid
 
-    bb = [-7.0251527e+22,3.1243395e+23,-4.2464027e+23,1.8903014e+23] #these values are from /data/ghgas/GOSAT/input/template/static_input/in/solar/solar_v2_2019.dat
+    #define polynomial coefficients of blackbody spectrum
+    #coefficients taken from /data/ghgas/GOSAT/input/template/static_input/in/solar/solar_v2_2019.dat
+    bb = [-7.0251527e+22,3.1243395e+23,-4.2464027e+23,1.8903014e+23] 
 
     continuum = zeros(length(cont_microns))
     for (i,this_wl) in enumerate(cont_microns)
@@ -436,7 +434,7 @@ function UoLFPSolarModel(
     continuum = continuum[end:-1:1]
 
     ww_unit = u"cm^-1"
-    ww = swin.ww_grid
+    ww = solar_grid
 
     irradiance_unit = u"W/m^2/cm^-1" 
 
