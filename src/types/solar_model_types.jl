@@ -33,7 +33,12 @@ end
 mutable struct UoLFPSolarModel{T} <: AbstractSolarModel
 
     file_name::String
-    ww::Vector{T}
+    line_centre_freq::Vector{T}
+    line_strength::Vector{T}
+    w_wid::Vector{T}
+    d_wid::Vector{T}
+    ww_nominal::Vector{T}
+    ww_shifted::Vector{T}
     transmittance::Vector{T}
     continuum::Vector{T}
     ww_unit::Union{Unitful.LengthUnits, Unitful.WavenumberUnits}

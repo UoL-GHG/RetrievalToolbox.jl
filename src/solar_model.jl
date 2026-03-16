@@ -45,31 +45,34 @@ function calculate_solar_irradiance!(
     doppler_factor=nothing
 )
 
-    # If no Doppler factor is provided, we could
-    # calculate it right here using rt.scene.location
-    # and rt.scene.time.
-    if isnothing(doppler_factor)
+    #UoL-FP solar model has already had Doppler shift applied
+    if !(solar_model isa UoLFPSolarModel)
 
-        doppler_factor = calculate_solar_doppler_shift(
-            rt.scene
-        )
+        # If no Doppler factor is provided, we could
+        # calculate it right here using rt.scene.location
+        # and rt.scene.time.
+        if isnothing(doppler_factor)
 
-    end
+            doppler_factor = calculate_solar_doppler_shift(
+                rt.scene
+            )
 
-    # Doppler effect depends on the spectral unit.
-
-    if solar_model.ww_unit isa Unitful.LengthUnits
-        # Very cheeky way of moving from λ -> λ * (1 + Doppler)
-        @turbo for i in eachindex(solar_model.ww)
-            solar_model.ww[i] *= (1 + doppler_factor)
         end
-    elseif solar_model.ww_unit isa Unitful.WavenumberUnits
-        # Very cheeky way of moving from ν -> ν / (1 + Doppler)
-        @turbo for i in eachindex(solar_model.ww)
-            solar_model.ww[i] /= (1 + doppler_factor)
+
+        # Doppler effect depends on the spectral unit.
+
+        if solar_model.ww_unit isa Unitful.LengthUnits
+            # Very cheeky way of moving from λ -> λ * (1 + Doppler)
+            @turbo for i in eachindex(solar_model.ww)
+                solar_model.ww[i] *= (1 + doppler_factor)
+            end
+        elseif solar_model.ww_unit isa Unitful.WavenumberUnits
+            # Very cheeky way of moving from ν -> ν / (1 + Doppler)
+            @turbo for i in eachindex(solar_model.ww)
+                solar_model.ww[i] /= (1 + doppler_factor)
+            end
         end
     end
-
     #=
     We must sample the solar spectrum at Doppler-influenced
     wavelengths and produce following result:
@@ -120,19 +123,24 @@ function calculate_solar_irradiance!(
         rt.hires_solar.S[i,1] *= rt.solar_scaler[i]
     end
 
-    if solar_model.ww_unit isa Unitful.LengthUnits
-        # Very cheeky way of moving back from λ * (1 + Doppler) -> λ
-        @turbo for i in eachindex(solar_model.ww)
-            solar_model.ww[i] /= (1 + doppler_factor)
+
+    #UoL-FP solar model has already had Doppler shift applied
+    if !(solar_model isa UoLFPSolarModel)
+
+
+        if solar_model.ww_unit isa Unitful.LengthUnits
+            # Very cheeky way of moving back from λ * (1 + Doppler) -> λ
+            @turbo for i in eachindex(solar_model.ww)
+                solar_model.ww[i] /= (1 + doppler_factor)
+            end
+        elseif solar_model.ww_unit isa Unitful.WavenumberUnits
+            # Very cheeky way of moving back from ν * (1 + Doppler) -> ν
+            @turbo for i in eachindex(solar_model.ww)
+                solar_model.ww[i] *= (1 + doppler_factor)
+            end
         end
-    elseif solar_model.ww_unit isa Unitful.WavenumberUnits
-        # Very cheeky way of moving back from ν * (1 + Doppler) -> ν
-        @turbo for i in eachindex(solar_model.ww)
-            solar_model.ww[i] *= (1 + doppler_factor)
-        end
+
     end
-
-
 
 end
 
@@ -339,31 +347,77 @@ Reads a Fraunhofer solar line list HDF5 file and returns
 a `UoLFPSolarModel` object.
 
 """
-
 function UoLFPSolarModel(
     filename::String,
-    spectral_grid::Vector,
-    wn_step::Float64
-    )
-
+    spectral_grid::Vector
+)
     @assert isfile(filename) "File $(filename) is not a regular file!"
 
     @debug "Opening up Solar HDF file $(filename)"
     h5 = h5open(filename, "r")
 
-    #mol_mass = h5["molecular_mass"][:]
-    freq = h5["freq"][:] #wavenumber of absorption line centre
-    stren = h5["stren"][:] #line strength
+    line_centre_freq = h5["freq"][:] #wavenumber of absorption line centre
+    line_strength = h5["stren"][:] #line strength
     w_wid = h5["w_wid"][:] #line width in wavenumbers (unsure what each represents)
     d_wid = h5["d_wid"][:] #line width in wavenumbers (potentially Doppler width?)
+
+    #UoL-FP solar model is calculated on the Doppler-shifted retrieval grid.
+    #So allocate empty arrays to be filled in on each run
+    ww_nominal = spectral_grid
+
+    N = length(spectral_grid)   
+    ww_shifted=zeros(my_type, N)
+    transmittance=zeros(my_type, N)
+    continuum=zeros(my_type, N)
+
+    ww_unit = u"cm^-1"
+    irradiance_unit = u"W/m^2/cm^-1" 
+
+    #Close h5 file
+    close(h5)
+
+        return UoLFPSolarModel(
+        filename,
+        line_centre_freq,
+        line_strength,
+        w_wid,
+        d_wid,
+        ww_nominal,
+        ww_shifted,
+        transmittance,
+        continuum,
+        ww_unit,
+        irradiance_unit
+    )
+
+end
+
+function calculate_UoLFPSolarModel_spectrum!(
+    solar_model::UoLFPSolarModel,
+    doppler_factor::my_type
+    )
 
     solar_angular_radius = (959.44/ 3600) * (pi / 180)
     fov = 9.2e-3 #field of view
     frac = fov / (2 * solar_angular_radius) #Fraction of the solar diameter viewed
 
-    #Define spectral grid on which solar absorption will be calculated
-    solar_grid = collect(spectral_grid[1]:wn_step:spectral_grid[end])
-    
+    #Solar absorption is calculated on the Doppler-shifted retrieval grid
+    # Doppler effect depends on the spectral unit.
+
+    if solar_model.ww_unit isa Unitful.LengthUnits
+        # Very cheeky way of moving from λ -> λ * (1 + Doppler)
+        @turbo for i in eachindex(solar_model.ww_nominal)
+            solar_model.ww_shifted[i] =  solar_model.ww_nominal[i] / (1 + doppler_factor)
+        end
+    elseif solar_model.ww_unit isa Unitful.WavenumberUnits
+        # Very cheeky way of moving from ν -> ν / (1 + Doppler)
+        #I think these signs might be wrong but it's what UoLFP does...
+        #Maybe Doppler shift is defined in the opposite way to Peter's convention
+        @turbo for i in eachindex(solar_model.ww_nominal)
+            solar_model.ww_shifted[i] = solar_model.ww_nominal[i] * (1 + doppler_factor)
+        end
+    end
+
     #solar limb darkening?
     #sld=2/(1+sqrt(1-frac^2))
     sld=1 #Assume no solar limb darkening?
@@ -371,85 +425,64 @@ function UoLFPSolarModel(
     #Select the solar lines needed for this spectral window - add a 100 cm-1 margin on both ends
     #to account for impact of broadened absorption lines centred outside the spectral window
     margin=100 
-    kline1=searchsortedfirst(freq,solar_grid[1]-margin)-1
-    kline2=searchsortedfirst(freq,solar_grid[end]+margin)-1
+    kline1=searchsortedfirst(solar_model.line_centre_freq,solar_model.ww_shifted[1]-margin)-1
+    kline2=searchsortedfirst(solar_model.line_centre_freq,solar_model.ww_shifted[end]+margin)-1
 
-    transmittance = zeros(length(solar_grid))
+    transmittance_temp = zeros(length(solar_model.ww_shifted))
 
     for line = kline1:kline2
-        if stren[line] < 0
+        if solar_model.line_strength[line] < 0
             this_str= 0
         else
-            this_str = stren[line]
+            this_str = solar_model.line_strength[line]
         end
-        this_freq = freq[line]
-        this_w_wid = w_wid[line]
-        this_d_wid = d_wid[line]
+        this_freq = solar_model.line_centre_freq[line]
+        this_w_wid = solar_model.w_wid[line]
+        this_d_wid = solar_model.d_wid[line]
         srot=5e-06*this_freq*frac #broadening due to solar rotation
         d4=(this_d_wid^2+srot^2)^2  #Total Gaussian width
         flinwid=sqrt(2*this_str*(this_d_wid+this_w_wid)/0.0001)
 
         #if the broadened line lies entirely outside our wavenumber range, we don't need to consider it
-        if ((this_freq + flinwid) < solar_grid[1])  continue end
-        if ((this_freq - flinwid) > solar_grid[end])  continue end
+        if ((this_freq + flinwid) < solar_model.ww_shifted[1])  continue end
+        if ((this_freq - flinwid) > solar_model.ww_shifted[end])  continue end
 
         y2=(this_w_wid)^2
         ss=sld*this_str
-        for iv= 1:length(solar_grid)
-            xx = solar_grid[iv] - this_freq
+        for iv= 1:length(solar_model.ww_shifted)
+            xx = solar_model.ww_shifted[iv] - this_freq
             if (abs(xx) > flinwid) continue end
             x2=xx^2
             rr=x2/sqrt(d4+y2*x2*(1+abs(xx/(this_w_wid+0.07))))
             yy=ss*exp(-rr)
-            transmittance[iv]-=yy
+            transmittance_temp[iv]-=yy
         end
     end
 
-    transmittance = exp.(transmittance)
+    @views solar_model.transmittance = exp.(transmittance_temp)
 
     #continuum spectrum is calculated in ph/s/m2/micron so we need to convert wavenumber to microns
-    cont_microns=1e4./solar_grid
+    cont_microns=1e4./solar_model.ww_shifted
 
     #define polynomial coefficients of blackbody spectrum
     #coefficients taken from /data/ghgas/GOSAT/input/template/static_input/in/solar/solar_v2_2019.dat
     bb = [-7.0251527e+22,3.1243395e+23,-4.2464027e+23,1.8903014e+23] 
 
-    continuum = zeros(length(cont_microns))
     for (i,this_wl) in enumerate(cont_microns)
         for j = 1:4
-            continuum[i]+=bb[j]*this_wl^(j-1)
+            solar_model.continuum[i]+=bb[j]*this_wl^(j-1)
         end
     end
 
     #continuum radiance is in units ph/s/m2/micron so convert to W/m2/cm-1
 
     #1) convert ph/s into W
-    @views continuum[:] .*= ustrip.(Ref(u"W"),
+    @views solar_model.continuum .*= ustrip.(Ref(u"W"),
         1.0u"s^-1" .* SPEED_OF_LIGHT ./ (cont_microns .* u"µm") .* PLANCK
     )
 
     #2) convert  W/m2/µm into W/m2/cm^-1
-    @views continuum[:] ./= (1e4 ./ cont_microns) .^ 2
-
-    continuum = continuum[end:-1:1]
-
-    ww_unit = u"cm^-1"
-    ww = solar_grid
-
-    irradiance_unit = u"W/m^2/cm^-1" 
-
-    # Close up HDF file, all done
-    close(h5)
-
-    # Return solar model object
-    return UoLFPSolarModel(
-        filename,
-        ww,
-        transmittance,
-        continuum,
-        ww_unit,
-        irradiance_unit
-    )
+    @views solar_model.continuum ./= (1e4 ./ cont_microns) .^ 2
 
 end
 
@@ -471,7 +504,7 @@ function calculate_solar_doppler_shift(
 
     geocen_lat = atand(tand(scene.location.latitude)/(1+6.73951496e-3)) #calculate geocentric latitude from geodetic latitude
     gcrad = scene.location.altitude + earth_radius/sqrt(1+6.73951496e-3*sind(geocen_lat)^2) #local earth radius
-    earth_rot_velocity = -earth_rot_freq * gcrad * sind(scene.solar_zenith) * cosd(scene.solar_azimuth-90u"°") * cosd(geocen_lat)
+    earth_rot_velocity = -earth_rot_freq * gcrad * sind(scene.solar_zenith) * cosd(scene.solar_azimuth-90) * cosd(geocen_lat)
 
     #Calculate portion of doppler shift due to movement of earth center away from sun
     a = [-1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
@@ -500,7 +533,8 @@ function calculate_earth_sun_distance(time::DateTime)
     #Parameters from 6th order polynomial fit to data from http://eclipse.gsfc.nasa.gov/TYPE/TYPE.html
     a = [0.98334, -1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
 
-    day_of_year = Dates.toms(time-DateTime(string(year(time)),dateformat"y")) ./ 1000 ./86400
+    #day_of_year = Dates.toms(time-DateTime(string(year(time)),dateformat"y")) ./ 1000 ./86400
+    day_of_year = Dates.dayofyear(buf.rt[window].scene.time) #this method removes sub-day precision, but it's what Uol-FP does
     j = [1,day_of_year,day_of_year^2,day_of_year^3,day_of_year^4,day_of_year^5,day_of_year^6]
     solar_earth_dist=(transpose(a)*j)
     return solar_earth_dist
