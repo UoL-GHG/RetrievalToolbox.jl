@@ -395,7 +395,7 @@ end
 
 function calculate_UoLFPSolarModel_spectrum!(
     solar_model::UoLFPSolarModel,
-    doppler_factor::Float
+    doppler_factor::Float64
     )
 
     solar_angular_radius = (959.44/ 3600) * (pi / 180)
