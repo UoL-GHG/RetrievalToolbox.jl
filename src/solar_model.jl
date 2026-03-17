@@ -350,7 +350,8 @@ a `UoLFPSolarModel` object.
 function UoLFPSolarModel(
     filename::String,
     spectral_grid::Vector
-)
+    )
+
     @assert isfile(filename) "File $(filename) is not a regular file!"
 
     @debug "Opening up Solar HDF file $(filename)"
@@ -366,9 +367,9 @@ function UoLFPSolarModel(
     ww_nominal = spectral_grid
 
     N = length(spectral_grid)   
-    ww_shifted=zeros(my_type, N)
-    transmittance=zeros(my_type, N)
-    continuum=zeros(my_type, N)
+    ww_shifted=zeros(N)
+    transmittance=zeros(N)
+    continuum=zeros(N)
 
     ww_unit = u"cm^-1"
     irradiance_unit = u"W/m^2/cm^-1" 
@@ -394,7 +395,7 @@ end
 
 function calculate_UoLFPSolarModel_spectrum!(
     solar_model::UoLFPSolarModel,
-    doppler_factor::my_type
+    doppler_factor::Float
     )
 
     solar_angular_radius = (959.44/ 3600) * (pi / 180)
