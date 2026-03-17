@@ -109,10 +109,10 @@ function calculate_solar_irradiance!(
         # retrieval wavelength grid
         # (and calculate continuum * transmittance in one step)
         pwl_value_1d_axb!(
-            solar_model.ww,
+            solar_model.ww_shifted,
             solar_model.transmittance,
             solar_model.continuum,
-            swin.ww_grid,
+            solar_model.ww_shifted,
             rt.hires_solar.I,
         ) 
 
@@ -535,7 +535,7 @@ function calculate_earth_sun_distance(time::DateTime)
     a = [0.98334, -1.82823e-5, 2.30179e-6, 6.62402e-9, -1.33287e-10, 3.98445e-13, -3.54239e-16]
 
     #day_of_year = Dates.toms(time-DateTime(string(year(time)),dateformat"y")) ./ 1000 ./86400
-    day_of_year = Dates.dayofyear(buf.rt[window].scene.time) #this method removes sub-day precision, but it's what Uol-FP does
+    day_of_year = Dates.dayofyear(time) #this method removes sub-day precision, but it's what Uol-FP does
     j = [1,day_of_year,day_of_year^2,day_of_year^3,day_of_year^4,day_of_year^5,day_of_year^6]
     solar_earth_dist=(transpose(a)*j)
     return solar_earth_dist
